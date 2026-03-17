@@ -29,18 +29,24 @@ type SummaryModel struct {
 	transactions  []*data.Transaction
 	incomeTxnNum  int
 	expenseTxnNum int
+	equityTxnNum  int
 	totalIncome   float64
 	totalExpense  float64
+	totalEquity   float64
 
 	topIncomeCategories  []summaryEntry
 	topIncomeAccounts    []summaryEntry
 	topExpenseCategories []summaryEntry
 	topExpenseAccounts   []summaryEntry
+	topEquityCategories  []summaryEntry
+	topEquityAccounts    []summaryEntry
 
 	incomeCategoryChart  barchart.Model
 	incomeAccountChart   barchart.Model
 	expenseCategoryChart barchart.Model
 	expenseAccountChart  barchart.Model
+	equityCategoryChart  barchart.Model
+	equityAccountChart   barchart.Model
 }
 
 func NewSummaryModel() SummaryModel {
@@ -59,15 +65,21 @@ func (m *SummaryModel) SetTransactions(transactions []*data.Transaction) {
 
 	m.incomeTxnNum = 0
 	m.expenseTxnNum = 0
+	m.equityTxnNum = 0
 	m.totalIncome = 0
 	m.totalExpense = 0
+	m.totalEquity = 0
 	for _, tx := range m.transactions {
-		if tx.Type == data.Income {
+		switch tx.Type {
+		case data.Income:
 			m.incomeTxnNum++
 			m.totalIncome += tx.Amount
-		} else {
+		case data.Expense:
 			m.expenseTxnNum++
 			m.totalExpense += tx.Amount
+		case data.Equity:
+			m.equityTxnNum++
+			m.totalEquity += tx.Amount
 		}
 	}
 
@@ -75,6 +87,8 @@ func (m *SummaryModel) SetTransactions(transactions []*data.Transaction) {
 	m.topIncomeAccounts, m.incomeAccountChart = m.getTopAccounts(data.Income)
 	m.topExpenseCategories, m.expenseCategoryChart = m.getTopCategories(data.Expense)
 	m.topExpenseAccounts, m.expenseAccountChart = m.getTopAccounts(data.Expense)
+	m.topEquityCategories, m.equityCategoryChart = m.getTopCategories(data.Equity)
+	m.topEquityAccounts, m.equityAccountChart = m.getTopAccounts(data.Equity)
 
 	m.updateCharts()
 }
@@ -84,6 +98,8 @@ func (m *SummaryModel) updateCharts() {
 	m.incomeAccountChart.Draw()
 	m.expenseCategoryChart.Draw()
 	m.expenseAccountChart.Draw()
+	m.equityCategoryChart.Draw()
+	m.equityAccountChart.Draw()
 }
 
 func (m *SummaryModel) resizeCharts() {
@@ -91,14 +107,18 @@ func (m *SummaryModel) resizeCharts() {
 	m.incomeAccountChart.Resize(m.width-2*hPadding, barChartHeight)
 	m.expenseCategoryChart.Resize(m.width-2*hPadding, barChartHeight)
 	m.expenseAccountChart.Resize(m.width-2*hPadding, barChartHeight)
+	m.equityCategoryChart.Resize(m.width-2*hPadding, barChartHeight)
+	m.equityAccountChart.Resize(m.width-2*hPadding, barChartHeight)
 }
 
 func (m SummaryModel) View() string {
 	var s strings.Builder
 	s.WriteString(fmt.Sprintf("Income transactions: %d\n", m.incomeTxnNum))
 	s.WriteString(fmt.Sprintf("Expense transactions: %d\n", m.expenseTxnNum))
-	s.WriteString(fmt.Sprintf("Total income: $%s\n", data.FormatMoney(m.totalIncome)))
-	s.WriteString(fmt.Sprintf("Total expenses: $%s\n", data.FormatMoney(m.totalExpense)))
+	s.WriteString(fmt.Sprintf("Equity transactions: %d\n", m.equityTxnNum))
+	s.WriteString(fmt.Sprintf("Total income: %s\n", data.FormatMoneyWithSymbol(m.totalIncome)))
+	s.WriteString(fmt.Sprintf("Total expenses: %s\n", data.FormatMoneyWithSymbol(m.totalExpense)))
+	s.WriteString(fmt.Sprintf("Total equity: %s\n", data.FormatMoneyWithSymbol(m.totalEquity)))
 
 	if len(m.transactions) > 0 {
 		s.WriteString("\nTop income categories:\n")
@@ -112,6 +132,14 @@ func (m SummaryModel) View() string {
 
 		s.WriteString("\n\nTop expense accounts:\n")
 		s.WriteString(m.renderSummarySection(m.topExpenseAccounts, m.expenseAccountChart))
+
+		if m.equityTxnNum > 0 {
+			s.WriteString("\n\nTop equity categories:\n")
+			s.WriteString(m.renderSummarySection(m.topEquityCategories, m.equityCategoryChart))
+
+			s.WriteString("\n\nTop equity accounts:\n")
+			s.WriteString(m.renderSummarySection(m.topEquityAccounts, m.equityAccountChart))
+		}
 	}
 
 	return lipgloss.NewStyle().
@@ -193,10 +221,10 @@ func (m SummaryModel) renderSummarySection(entries []summaryEntry, chart barchar
 	var s strings.Builder
 	for i, item := range entries {
 		s.WriteString(fmt.Sprintf(
-			"%s %s: $%s\n",
+			"%s %s: %s\n",
 			barChartStyles[i].Render(string(runes.FullBlock)), // Bar legend
 			item.key,
-			data.FormatMoney(item.value),
+			data.FormatMoneyWithSymbol(item.value),
 		))
 	}
 	s.WriteString("\n")

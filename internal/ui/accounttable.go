@@ -160,10 +160,11 @@ func getAccountInfo(transactions []*data.Transaction) []*accountInfo {
 			}
 			accountMap[tx.Account] = account
 		}
-		if tx.Type == data.Income {
+		switch tx.Type {
+		case data.Income:
 			account.income += tx.Amount
 			totalIncome += tx.Amount
-		} else {
+		case data.Expense, data.Equity:
 			account.expense += tx.Amount
 			totalExpense += tx.Amount
 		}

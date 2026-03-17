@@ -44,9 +44,10 @@ func aggregate(transactions []*data.Transaction, aggLevel date.Increment, matche
 			entry = &ui.TsChartEntry{Date: date}
 			entryMap[date] = entry
 		}
-		if t.Type == data.Income {
+		switch t.Type {
+		case data.Income:
 			entry.Income += t.Amount
-		} else {
+		case data.Expense, data.Equity:
 			entry.Expense += t.Amount
 		}
 	}

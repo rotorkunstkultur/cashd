@@ -35,8 +35,10 @@ var (
 
 	incomeColor  = chartColor3
 	expenseColor = chartColor1
+	equityColor  = chartColor5
 	incomeStyle  = lipgloss.NewStyle().Foreground(incomeColor)
 	expenseStyle = lipgloss.NewStyle().Foreground(expenseColor)
+	equityStyle  = lipgloss.NewStyle().Foreground(equityColor)
 
 	roundedBorder = lipgloss.RoundedBorder()
 

@@ -14,10 +14,13 @@ import (
 type insight struct {
 	income         float64
 	expense        float64
+	equity         float64
 	incomeTxnNum   int
 	expenseTxnNum  int
+	equityTxnNum   int
 	topIncomeTxns  []*data.Transaction
 	topExpenseTxns []*data.Transaction
+	topEquityTxns  []*data.Transaction
 }
 
 const (
@@ -51,6 +54,7 @@ func (m *InsightsModel) updateInsights(transactions []*data.Transaction, match f
 	m.ins = insight{}
 	incomeTxns := []*data.Transaction{}
 	expenseTxns := []*data.Transaction{}
+	equityTxns := []*data.Transaction{}
 
 	for _, t := range transactions {
 		if match(t) {
@@ -61,18 +65,25 @@ func (m *InsightsModel) updateInsights(transactions []*data.Transaction, match f
 			case data.Expense:
 				m.ins.expense += t.Amount
 				expenseTxns = append(expenseTxns, t)
+			case data.Equity:
+				m.ins.equity += t.Amount
+				equityTxns = append(equityTxns, t)
 			}
 		}
 	}
 
 	m.ins.incomeTxnNum = len(incomeTxns)
 	m.ins.expenseTxnNum = len(expenseTxns)
+	m.ins.equityTxnNum = len(equityTxns)
 
 	sort.Slice(incomeTxns, func(i, j int) bool {
 		return incomeTxns[i].Amount > incomeTxns[j].Amount
 	})
 	sort.Slice(expenseTxns, func(i, j int) bool {
 		return expenseTxns[i].Amount > expenseTxns[j].Amount
+	})
+	sort.Slice(equityTxns, func(i, j int) bool {
+		return equityTxns[i].Amount > equityTxns[j].Amount
 	})
 	if m.ins.incomeTxnNum <= topTxnNum {
 		m.ins.topIncomeTxns = incomeTxns
@@ -83,6 +94,11 @@ func (m *InsightsModel) updateInsights(transactions []*data.Transaction, match f
 		m.ins.topExpenseTxns = expenseTxns
 	} else {
 		m.ins.topExpenseTxns = expenseTxns[:topTxnNum]
+	}
+	if m.ins.equityTxnNum <= topTxnNum {
+		m.ins.topEquityTxns = equityTxns
+	} else {
+		m.ins.topEquityTxns = equityTxns[:topTxnNum]
 	}
 }
 
@@ -105,9 +121,9 @@ func (m InsightsModel) View() string {
 	if m.ins.incomeTxnNum > 0 {
 		s.WriteString("\n")
 		s.WriteString(fmt.Sprintf(
-			"%s Income: $%s in %d transactions\n",
+			"%s Income: %s in %d transactions\n",
 			incomeStyle.Render(string(runes.FullBlock)),
-			data.FormatMoney(m.ins.income),
+			data.FormatMoneyWithSymbol(m.ins.income),
 			m.ins.incomeTxnNum,
 		))
 		s.WriteString("Top transactions:\n")
@@ -119,13 +135,27 @@ func (m InsightsModel) View() string {
 	if m.ins.expenseTxnNum > 0 {
 		s.WriteString("\n")
 		s.WriteString(fmt.Sprintf(
-			"%s Expense: $%s in %d transactions\n",
+			"%s Expense: %s in %d transactions\n",
 			expenseStyle.Render(string(runes.FullBlock)),
-			data.FormatMoney(m.ins.expense),
+			data.FormatMoneyWithSymbol(m.ins.expense),
 			m.ins.expenseTxnNum,
 		))
 		s.WriteString("Top transactions:\n")
 		for _, t := range m.ins.topExpenseTxns {
+			s.WriteString(formatTransaction(t))
+		}
+	}
+
+	if m.ins.equityTxnNum > 0 {
+		s.WriteString("\n")
+		s.WriteString(fmt.Sprintf(
+			"%s Equity: %s in %d transactions\n",
+			equityStyle.Render(string(runes.FullBlock)),
+			data.FormatMoneyWithSymbol(m.ins.equity),
+			m.ins.equityTxnNum,
+		))
+		s.WriteString("Top transactions:\n")
+		for _, t := range m.ins.topEquityTxns {
 			s.WriteString(formatTransaction(t))
 		}
 	}
@@ -144,7 +174,7 @@ func formatTransaction(t *data.Transaction) string {
 		"%s %*s %s\n",
 		t.Date.Format(time.DateOnly),
 		amountColWidth,
-		fmt.Sprintf("$%s", t.FormattedAmount()),
+		data.FormatMoneyWithSymbol(t.Amount),
 		t.Description,
 	)
 }
