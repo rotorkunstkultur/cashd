@@ -5,6 +5,18 @@ import (
 	"strings"
 )
 
+var currencySymbol = "$"
+
+// SetCurrencySymbol sets the currency symbol used for display.
+func SetCurrencySymbol(s string) {
+	currencySymbol = s
+}
+
+// FormatMoneyWithSymbol formats an amount with the configured currency symbol.
+func FormatMoneyWithSymbol(amount float64) string {
+	return currencySymbol + FormatMoney(amount)
+}
+
 func FormatMoney(amount float64) string {
 	s := fmt.Sprintf("%.2f", amount)
 	parts := strings.Split(s, ".")

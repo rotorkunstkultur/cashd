@@ -1,124 +1,187 @@
 package ledger
 
 import (
-	"bufio"
 	"cashd/internal/data"
+	"encoding/csv"
 	"fmt"
 	"io"
-	"log"
 	"math"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
 )
 
-const (
-	assets    = "assets"
-	liability = "liability"
-	expenses  = "expenses"
-	income    = "income"
-)
+// csvPosting represents a single posting row from `ledger csv --generated`.
+type csvPosting struct {
+	date        time.Time
+	description string
+	account     string
+	amount      float64
+}
 
-// ParseJournal reads the hledger journal file and parses transactions.
-func parseJournal(reader io.ReadCloser) ([]*data.Transaction, error) {
-	var transactions []*data.Transaction
-	scanner := bufio.NewScanner(reader)
+// parseJournal reads CSV output from `ledger csv --generated` and produces transactions.
+// CSV columns: date, code, payee, account, currency, amount, cost, note
+func parseJournal(reader io.ReadCloser, config *AccountRoleConfig) ([]*data.Transaction, error) {
+	r := csv.NewReader(reader)
+	r.FieldsPerRecord = -1 // allow variable fields
 
-	// Regex to match transaction header: YYYY-MM-DD Description
-	// TODO: add support for '!' or '*' or '(code)' after date
-	// TODO: add support for '| note'
-	transactionHeaderRegex := regexp.MustCompile(`^(\d{4}-\d{2}-\d{2})\s+(.*)$`)
-	// Regex to match account line, with the following variations
-	// transaction type:category amount, e.g. expenses:Utilities 49.99, income:Cash Back $-47.11
-	// account type:account amount, e.g. liability:BoA 123 $-49.99, assets:BoA Checking $47.11
-	// TODO: add support for commodity other than '$'
-	accountLineRegex := regexp.MustCompile(`^\s+(.+):(.+)\s{2,}\$[-]?([\d,]+\.?\d*)$`)
+	var postings []csvPosting
 
-	var transactionDate time.Time
-	var transactionDesc string
-	var transactionType data.TransactionType
-	var transactionCategory string
-	var transactionAccount string
-	var accountType data.AccountType
-	var transactionAmount float64
-	var numPostings int
+	for {
+		record, err := r.Read()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, fmt.Errorf("error reading CSV: %w", err)
+		}
 
-	for scanner.Scan() {
-		line := scanner.Text()
-
-		if line == "" || strings.HasPrefix(line, ";") || strings.HasPrefix(line, "#") {
-			// Skip empty lines and comments
+		if len(record) < 6 {
 			continue
 		}
 
-		if matches := transactionHeaderRegex.FindStringSubmatch(line); len(matches) > 0 {
-			// This is a new transaction header
-			numPostings = 0
-			dateStr := matches[1]
-			description := matches[2]
+		dateStr := record[0]
+		description := record[2]
+		account := record[3]
+		amountStr := record[5]
 
-			parsedDate, err := time.ParseInLocation("2006-01-02", dateStr, time.Local)
-			if err != nil {
-				return nil, fmt.Errorf("failed to parse date %q: %w", dateStr, err)
-			}
-			transactionDate = parsedDate
-			transactionDesc = description
-		} else if matches := accountLineRegex.FindStringSubmatch(line); len(matches) > 0 {
-			// This is a posting for the current transaction
-			numPostings++
-			typeStr := strings.TrimSpace(matches[1])             // account type (assets, liability) or transactionType (income, expense)
-			accountOrCategory := strings.TrimSpace(matches[2])   // account or cateogory
-			amountStr := strings.ReplaceAll(matches[3], ",", "") // Remove commas for parsing
-			amountStr = strings.ReplaceAll(amountStr, "$", "")   // Remove dollar sign
-
-			amount, err := strconv.ParseFloat(amountStr, 64)
-			if err != nil {
-				return nil, fmt.Errorf("failed to parse amount %q: %w", amountStr, err)
-			}
-			transactionAmount = math.Abs(amount)
-
-			switch typeStr {
-			case expenses:
-				transactionType = data.Expense
-				transactionCategory = accountOrCategory
-			case income:
-				transactionType = data.Income
-				transactionCategory = accountOrCategory
-			case assets:
-				transactionAccount = accountOrCategory
-				if strings.ToLower(transactionAccount) == "cash" {
-					accountType = data.AcctCash
-				} else {
-					accountType = data.AcctBankAccount
-				}
-			case liability:
-				transactionAccount = accountOrCategory
-				accountType = data.AcctCreditCard
-			}
-
-			// Currently only handling transactions that involves exactly 2 postings
-			// TODO: add support for more than 2 postings
-			if numPostings == 2 {
-				t := data.Transaction{
-					Date:        transactionDate,
-					Type:        transactionType,
-					Account:     transactionAccount,
-					AccountType: accountType,
-					Category:    transactionCategory,
-					Amount:      transactionAmount,
-					Description: transactionDesc,
-				}
-				transactions = append(transactions, &t)
-			}
-		} else {
-			log.Printf("skipping line: %s\n", line)
+		parsedDate, err := time.ParseInLocation("2006/01/02", dateStr, time.Local)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse date %q: %w", dateStr, err)
 		}
+
+		amountStr = strings.ReplaceAll(amountStr, ",", "")
+		amount, err := strconv.ParseFloat(amountStr, 64)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse amount %q: %w", amountStr, err)
+		}
+
+		postings = append(postings, csvPosting{
+			date:        parsedDate,
+			description: description,
+			account:     account,
+			amount:      amount,
+		})
 	}
 
-	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("error parsing hledger journal: %w", err)
+	// Group postings by (date, description) to reconstruct transactions
+	type txnKey struct {
+		date time.Time
+		desc string
+	}
+
+	var keys []txnKey
+	groups := make(map[txnKey][]csvPosting)
+	for _, p := range postings {
+		key := txnKey{date: p.date, desc: p.description}
+		if _, exists := groups[key]; !exists {
+			keys = append(keys, key)
+		}
+		groups[key] = append(groups[key], p)
+	}
+
+	var transactions []*data.Transaction
+
+	for _, key := range keys {
+		group := groups[key]
+		txns := pairPostings(group, key.date, key.desc, config)
+		transactions = append(transactions, txns...)
 	}
 
 	return transactions, nil
+}
+
+// classifiedPosting holds a posting with its resolved role and sub-account parts.
+type classifiedPosting struct {
+	posting csvPosting
+	role    AccountRole
+	rest    string // everything after the root account prefix (e.g. "Reisekosten:Fahrtkosten")
+}
+
+// pairPostings implements the multi-posting pairing algorithm:
+// 1. Classify each posting by role
+// 2. Separate into P&L+Equity (expense/income/equity) vs balance sheet (asset/liability)
+// 3. If no balance sheet postings -> skip
+// 4. Each P&L/equity posting paired with primary balance sheet posting (largest abs amount) -> one Transaction
+// 5. Balance-sheet-only transfers -> skipped
+func pairPostings(group []csvPosting, date time.Time, desc string, config *AccountRoleConfig) []*data.Transaction {
+	var plPostings []classifiedPosting
+	var bsPostings []classifiedPosting
+
+	for _, p := range group {
+		root := strings.SplitN(p.account, ":", 2)[0]
+		rest := ""
+		if idx := strings.Index(p.account, ":"); idx >= 0 {
+			rest = p.account[idx+1:]
+		}
+
+		role := config.Classify(root)
+		cp := classifiedPosting{posting: p, role: role, rest: rest}
+
+		switch role {
+		case RoleExpense, RoleIncome, RoleEquity:
+			plPostings = append(plPostings, cp)
+		case RoleAsset, RoleLiability:
+			bsPostings = append(bsPostings, cp)
+		}
+	}
+
+	if len(bsPostings) == 0 {
+		return nil
+	}
+
+	// Find primary balance sheet posting (largest absolute amount)
+	primary := bsPostings[0]
+	for _, bp := range bsPostings[1:] {
+		if math.Abs(bp.posting.amount) > math.Abs(primary.posting.amount) {
+			primary = bp
+		}
+	}
+
+	account := primary.rest
+	if account == "" {
+		account = "unknown"
+	}
+	var accountType data.AccountType
+	switch primary.role {
+	case RoleAsset:
+		if strings.EqualFold(account, "cash") {
+			accountType = data.AcctCash
+		} else {
+			accountType = data.AcctBankAccount
+		}
+	case RoleLiability:
+		accountType = data.AcctCreditCard
+	}
+
+	var transactions []*data.Transaction
+	for _, pl := range plPostings {
+		var txnType data.TransactionType
+		switch pl.role {
+		case RoleExpense:
+			txnType = data.Expense
+		case RoleIncome:
+			txnType = data.Income
+		case RoleEquity:
+			txnType = data.Equity
+		}
+
+		category := pl.rest
+		if category == "" {
+			category = "unknown"
+		}
+
+		t := data.Transaction{
+			Date:        date,
+			Type:        txnType,
+			Account:     account,
+			AccountType: accountType,
+			Category:    category,
+			Amount:      math.Abs(pl.posting.amount),
+			Description: desc,
+		}
+		transactions = append(transactions, &t)
+	}
+
+	return transactions
 }
