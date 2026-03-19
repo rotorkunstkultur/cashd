@@ -56,16 +56,6 @@ The following limitations are known:
 - A nerd font enabled terminal
 - (Optional) ledger or hledger
 
-### 📦 Prebuilt binary
-
-Prebuilt binaries can be downloaded from the [release page](https://github.com/hzqtc/cashd/releases).
-
-Or using [eget](https://github.com/zyedidia/eget)
-
-```bash
-eget hzqtc/cashd
-```
-
 ### 🏗️ Build from source
 
 To build `cashd`, ensure you have Go installed (version 1.18 or higher).
