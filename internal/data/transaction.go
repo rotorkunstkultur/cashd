@@ -13,15 +13,19 @@ import (
 type TransactionType string
 
 const (
-	Income  TransactionType = "Income"
-	Expense TransactionType = "Expense"
-	Equity  TransactionType = "Equity"
+	Income      TransactionType = "Income"
+	Expense     TransactionType = "Expense"
+	Equity      TransactionType = "Equity"
+	TransferIn  TransactionType = "TransferIn"
+	TransferOut TransactionType = "TransferOut"
 )
 
 const (
-	incomeSymbol = "󱙹"
-	expensSymbol = ""
-	equitySymbol = "\U000F0295"
+	incomeSymbol      = "󱙹"
+	expensSymbol      = ""
+	equitySymbol      = "\U000F0295"
+	transferInSymbol  = "󰄷"
+	transferOutSymbol = "󰄱"
 )
 
 func (t *TransactionType) UnmarshalJSON(data []byte) error {
@@ -30,7 +34,7 @@ func (t *TransactionType) UnmarshalJSON(data []byte) error {
 		return fmt.Errorf("failed to unmarshal TransactionType: %w", err)
 	}
 
-	if s == string(Income) || s == string(Expense) || s == string(Equity) {
+	if s == string(Income) || s == string(Expense) || s == string(Equity) || s == string(TransferIn) || s == string(TransferOut) {
 		*t = TransactionType(s)
 		return nil
 	} else {
@@ -122,6 +126,10 @@ func (t *Transaction) Symbol() string {
 		return expensSymbol
 	case Equity:
 		return equitySymbol
+	case TransferIn:
+		return transferInSymbol
+	case TransferOut:
+		return transferOutSymbol
 	default:
 		return ""
 	}

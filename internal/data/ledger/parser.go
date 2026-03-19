@@ -99,17 +99,24 @@ type classifiedPosting struct {
 }
 
 // pairPostings implements the multi-posting pairing algorithm:
-// 1. Classify each posting by role
-// 2. Separate into P&L+Equity (expense/income/equity) vs balance sheet (asset/liability)
-// 3. If no balance sheet postings -> skip
-// 4. Each P&L/equity posting paired with primary balance sheet posting (largest abs amount) -> one Transaction
-// 5. Balance-sheet-only transfers -> skipped
+// 1. Filter out ignored root accounts
+// 2. Classify each posting by role (unknown-role → P&L)
+// 3. Separate into P&L+Equity (expense/income/equity/unknown) vs balance sheet (asset/liability)
+// 4. If no balance sheet postings -> skip
+// 5. BS-only transfers (no P&L, 2+ BS) -> TransferIn/TransferOut based on primary direction
+// 6. Each P&L/equity posting paired with primary balance sheet posting (largest abs amount) -> one Transaction
 func pairPostings(group []csvPosting, date time.Time, desc string, config *AccountRoleConfig) []*data.Transaction {
 	var plPostings []classifiedPosting
 	var bsPostings []classifiedPosting
 
 	for _, p := range group {
 		root := strings.SplitN(p.account, ":", 2)[0]
+
+		// Skip ignored roots
+		if config.IsIgnored(root) {
+			continue
+		}
+
 		rest := ""
 		if idx := strings.Index(p.account, ":"); idx >= 0 {
 			rest = p.account[idx+1:]
@@ -123,6 +130,9 @@ func pairPostings(group []csvPosting, date time.Time, desc string, config *Accou
 			plPostings = append(plPostings, cp)
 		case RoleAsset, RoleLiability:
 			bsPostings = append(bsPostings, cp)
+		default:
+			// Unknown-role postings treated as P&L
+			plPostings = append(plPostings, cp)
 		}
 	}
 
@@ -154,6 +164,39 @@ func pairPostings(group []csvPosting, date time.Time, desc string, config *Accou
 		accountType = data.AcctCreditCard
 	}
 
+	// BS-only transfers: no P&L postings but 2+ BS postings
+	if len(plPostings) == 0 && len(bsPostings) >= 2 {
+		var transactions []*data.Transaction
+		for _, bp := range bsPostings {
+			if bp.posting.account == primary.posting.account {
+				continue
+			}
+			var txnType data.TransactionType
+			if primary.posting.amount > 0 {
+				txnType = data.TransferIn
+			} else {
+				txnType = data.TransferOut
+			}
+
+			category := bp.rest
+			if category == "" {
+				category = "unknown"
+			}
+
+			t := data.Transaction{
+				Date:        date,
+				Type:        txnType,
+				Account:     account,
+				AccountType: accountType,
+				Category:    category,
+				Amount:      math.Abs(bp.posting.amount),
+				Description: desc,
+			}
+			transactions = append(transactions, &t)
+		}
+		return transactions
+	}
+
 	var transactions []*data.Transaction
 	for _, pl := range plPostings {
 		var txnType data.TransactionType
@@ -164,6 +207,13 @@ func pairPostings(group []csvPosting, date time.Time, desc string, config *Accou
 			txnType = data.Income
 		case RoleEquity:
 			txnType = data.Equity
+		default:
+			// Unknown-role postings: infer from amount sign
+			if pl.posting.amount > 0 {
+				txnType = data.Income
+			} else {
+				txnType = data.Expense
+			}
 		}
 
 		category := pl.rest

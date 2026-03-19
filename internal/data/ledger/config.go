@@ -21,7 +21,8 @@ const (
 
 // AccountRoleConfig maps root account name prefixes to roles.
 type AccountRoleConfig struct {
-	roots map[string]AccountRole
+	roots   map[string]AccountRole
+	ignored map[string]bool
 }
 
 var (
@@ -30,6 +31,7 @@ var (
 	flagExpenseRoots   string
 	flagIncomeRoots    string
 	flagEquityRoots    string
+	flagIgnoreRoots    string
 )
 
 func init() {
@@ -38,10 +40,11 @@ func init() {
 	pflag.StringVar(&flagExpenseRoots, "expense-roots", "", "Comma-separated expense root account names")
 	pflag.StringVar(&flagIncomeRoots, "income-roots", "", "Comma-separated income root account names")
 	pflag.StringVar(&flagEquityRoots, "equity-roots", "", "Comma-separated equity root account names")
+	pflag.StringVar(&flagIgnoreRoots, "ignore-roots", "", "Comma-separated root account names to ignore")
 }
 
 func newAccountRoleConfig() *AccountRoleConfig {
-	cfg := &AccountRoleConfig{roots: make(map[string]AccountRole)}
+	cfg := &AccountRoleConfig{roots: make(map[string]AccountRole), ignored: make(map[string]bool)}
 
 	addRoots := func(flag, envVar, defaultVal string, role AccountRole) {
 		val := flag
@@ -65,7 +68,24 @@ func newAccountRoleConfig() *AccountRoleConfig {
 	addRoots(flagIncomeRoots, "CASHD_INCOME_ROOTS", "income", RoleIncome)
 	addRoots(flagEquityRoots, "CASHD_EQUITY_ROOTS", "", RoleEquity)
 
+	// Load ignored roots
+	ignoreVal := flagIgnoreRoots
+	if ignoreVal == "" {
+		ignoreVal = os.Getenv("CASHD_IGNORE_ROOTS")
+	}
+	for _, root := range strings.Split(ignoreVal, ",") {
+		root = strings.TrimSpace(root)
+		if root != "" {
+			cfg.ignored[strings.ToLower(root)] = true
+		}
+	}
+
 	return cfg
+}
+
+// IsIgnored returns true if the given root account should be filtered out.
+func (c *AccountRoleConfig) IsIgnored(rootAccount string) bool {
+	return c.ignored[strings.ToLower(rootAccount)]
 }
 
 // Classify returns the role for a given root account name.
