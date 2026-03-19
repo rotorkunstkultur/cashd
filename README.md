@@ -9,6 +9,18 @@ It allows you to effortlessly track, analyze, and gain insights into your financ
   <img src="https://raw.github.com/hzqtc/cashd/master/screenshots/account_view.png" width="400" />
 </p>
 
+## 🍴 Fork Changes
+
+This is a fork of [hzqtc/cashd](https://github.com/hzqtc/cashd) with the following additions:
+
+- **Ledger CSV parser** — replaces the custom text parser with `ledger csv --generated`, providing more reliable output parsing
+- **Configurable account roles** — map root account names to roles (asset, liability, expense, income, equity) via CLI flags or env vars
+- **Equity transaction type** — supports equity accounts alongside income and expense
+- **Balance-sheet transfers** — `TransferIn` and `TransferOut` types for transfers between asset/liability accounts
+- **Configurable currency symbol** — `--currency-symbol` / `CASHD_CURRENCY_SYMBOL` (default: `$`)
+- **Account filtering** — `--ignore-roots` / `CASHD_IGNORE_ROOTS` to hide entire account trees
+- **Fixed `--ledger` flag** — lazy path resolution so the flag works reliably with env var fallbacks
+
 ## ✨ Features
 
 - **Interactive TUI:** Navigate through your financial data with an intuitive and responsive terminal interface.
@@ -26,11 +38,8 @@ It allows you to effortlessly track, analyze, and gain insights into your financ
 
 The following limitations are known:
 
-- Only supports `Income` and `Expense` transaction types
 - Only supports `Cash`, `Bank Account` and `Credit Card` as account types
-- Only supports `$` as the currency
-- Specficially for `ledger` transactions
-  - Only supports 2 postings per transaction
+- Ledger CSV output is limited to 2 postings per transaction (multi-posting transactions are expanded by `--generated`)
 
 ### 📊 Supported Data Sources
 
@@ -38,7 +47,7 @@ The following limitations are known:
 
 - **CSV Files:** Load transactions from a standard CSV file. `cashd` provides extensive configuration options to correctly parse your CSV data.
 - **Ledger/Hledger:** Integrate seamlessly with popular plain-text accounting tools like `ledger` and `hledger` by parsing their journal files.
-  - Note: `cashd` invokes `ledger print` or `hledger print` and does not read journal files directly
+  - Note: `cashd` invokes `ledger csv --generated` or `hledger csv --generated` and does not read journal files directly
 
 ## ⬇️ Installation
 
@@ -116,7 +125,7 @@ Use a keyword prefix to specify a field for matching.
 
 - `d:` match transaction Date, also supports `>` and `<` operators
   - For example, `d:2020-04-05`, or `d:>2020 d:<2023`
-- `t:` match transaction Type
+- `t:` match transaction Type (`Income`, `Expense`, `Equity`, `TransferIn`, `TransferOut`)
 - `a:` match transaction Account
 - `c:` match transaction Category
 - `m:` match transaction Amount, also supports `>` and `<` operators
@@ -151,6 +160,33 @@ A keyword can be turned into a negative keyword by adding a `-` prefix.
 - `--csv-config <file_path>`: Specify the path to your CSV configuration JSON file.
 - `--ledger <file_path>`: Specify the path to your Ledger/Hledger journal file.
 - `--hide-help`: Hide in-app help panel
+
+#### Ledger Account Configuration
+
+These flags configure how ledger accounts are classified. Each accepts a comma-separated list of root account names (case-insensitive).
+
+| Flag | Env Var | Default |
+|------|---------|---------|
+| `--asset-roots` | `CASHD_ASSET_ROOTS` | `assets` |
+| `--liability-roots` | `CASHD_LIABILITY_ROOTS` | `liability` |
+| `--expense-roots` | `CASHD_EXPENSE_ROOTS` | `expenses` |
+| `--income-roots` | `CASHD_INCOME_ROOTS` | `income` |
+| `--equity-roots` | `CASHD_EQUITY_ROOTS` | *(none)* |
+| `--ignore-roots` | `CASHD_IGNORE_ROOTS` | *(none)* |
+| `--currency-symbol` | `CASHD_CURRENCY_SYMBOL` | `$` |
+
+Example with German-language account names (SKR04):
+
+```bash
+cashd --ledger buchungen.dat \
+  --asset-roots "Aktiva" \
+  --liability-roots "Fremdkapital" \
+  --expense-roots "Aufwendungen" \
+  --income-roots "Erlöse" \
+  --equity-roots "Eigenkapital" \
+  --ignore-roots "Tools" \
+  --currency-symbol "€"
+```
 
 ## ⚙️ CSV Configuration File Format
 
