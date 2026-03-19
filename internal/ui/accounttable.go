@@ -2,9 +2,13 @@ package ui
 
 import (
 	"cashd/internal/data"
+	"os"
+	"regexp"
 	"sort"
+	"strings"
 
 	"github.com/charmbracelet/bubbles/table"
+	"github.com/spf13/pflag"
 )
 
 type accountColumn int
@@ -83,6 +87,50 @@ var accountColWidthMap = map[accountColumn]int{
 	acctColName:    accountColWidth,
 	acctColIncome:  amountColWidth,
 	acctColExpense: amountColWidth,
+}
+
+var flagShowAccounts string
+
+func init() {
+	pflag.StringVar(&flagShowAccounts, "show-accounts", "", "Comma-separated regex patterns for accounts to show")
+}
+
+var showAccountPatterns []*regexp.Regexp
+
+func getShowAccountPatterns() []*regexp.Regexp {
+	if showAccountPatterns != nil {
+		return showAccountPatterns
+	}
+	val := flagShowAccounts
+	if val == "" {
+		val = os.Getenv("CASHD_SHOW_ACCOUNTS")
+	}
+	if val == "" {
+		return nil
+	}
+	for _, p := range strings.Split(val, ",") {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		if re, err := regexp.Compile(p); err == nil {
+			showAccountPatterns = append(showAccountPatterns, re)
+		}
+	}
+	return showAccountPatterns
+}
+
+func accountMatchesFilter(name string) bool {
+	patterns := getShowAccountPatterns()
+	if len(patterns) == 0 {
+		return true
+	}
+	for _, re := range patterns {
+		if re.MatchString(name) {
+			return true
+		}
+	}
+	return false
 }
 
 const AccountNameTotal = "All Accounts"
@@ -170,18 +218,23 @@ func getAccountInfo(transactions []*data.Transaction) []*accountInfo {
 		}
 	}
 
-	accounts := []*accountInfo{
-		// Add a pseudo account for "Overall" income and expense
-		{
-			symbol:      "",
-			accountType: data.AcctOverall,
-			name:        AccountNameTotal,
-			income:      totalIncome,
-			expense:     totalExpense,
-		},
-	}
+	var filteredIncome, filteredExpense float64
+	accounts := []*accountInfo{}
 	for _, a := range accountMap {
-		accounts = append(accounts, a)
+		if accountMatchesFilter(a.name) {
+			accounts = append(accounts, a)
+			filteredIncome += a.income
+			filteredExpense += a.expense
+		}
 	}
+
+	// Add a pseudo account for "Overall" income and expense (of visible accounts)
+	accounts = append(accounts, &accountInfo{
+		symbol:      "",
+		accountType: data.AcctOverall,
+		name:        AccountNameTotal,
+		income:      filteredIncome,
+		expense:     filteredExpense,
+	})
 	return accounts
 }
